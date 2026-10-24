@@ -105,8 +105,10 @@ Pre-commit hook runs `moon run :check`.
 
   The servers run OFFLINE (the user's): a name proves nothing, so who gets in is two existing mods
   — never a mod of our own. `[minecraft.<n>.discord]` installs Simple Discord Link (`sdlink`) and
-  writes its `config/simple-discord-link/simple-discord-link.toml` (`general.configVersion` 37 in
-  it: the mod cannot read a file without one; the token `${CFG_DISCORD_TOKEN}` from the Secret
+  writes its `config/simple-discord-link/simple-discord-link.toml` (`general.configVersion` 36 in
+  it, one below the mod's 37: a file of its own version is read as complete and a missing key is
+  null — a null flag stopped the mod on the cluster (2026-10-24) — while an older one is migrated,
+  the mod's defaults filled in; a file with no version it cannot read; the token `${CFG_DISCORD_TOKEN}` from the Secret
   `discord.secret`, access control on, `roles`, `member`, `banSync`): an unlinked name is turned
   away with a code for the bot. It fails OPEN while the bot is down, and the link is by name —
   hence `[minecraft.<n>.auth]`: EasyAuth (`easyauth`), a password per name, its

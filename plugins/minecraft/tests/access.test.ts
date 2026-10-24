@@ -49,7 +49,7 @@ describe('discord and auth', () => {
 
   it("write Simple Discord Link's file: the token from its variable, access control on", () => {
     expect(filesOf(GUARDED)['simple-discord-link/simple-discord-link.toml']).toEqual({
-      general: { configVersion: 37 },
+      general: { configVersion: 36 },
       botConfig: { botToken: `\${CFG_DISCORD_TOKEN}` },
       accessControl: {
         enabled: true,

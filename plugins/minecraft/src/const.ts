@@ -96,13 +96,15 @@ export const CONFIGS_PREFIX = 'config/'
 export const CONFIG_VOLUME = 'config'
 
 /**
- * `discord`: Simple Discord Link (Modrinth `sdlink`), its configuration file, and the version of
- * that file's layout — written into it, the mod reads the file as it is (a file without one is
- * one it migrates, and it cannot read one that has none).
+ * `discord`: Simple Discord Link (Modrinth `sdlink`), its configuration file, and the layout
+ * version written into it. The mod reads a file of its own version as complete — a key it does not
+ * have is null, and a null flag stops the mod (`GeneralConfigSettings.enabled`, seen on 3.4.5 with
+ * 37) — and it cannot read a file with no version. A version below its own (37 on 3.4.5) is one it
+ * migrates: every key of its defaults, the file's value where the file has one, then saved whole.
  */
 export const SDLINK_PROJECT = 'sdlink'
 export const SDLINK_CONFIG = 'config/simple-discord-link/simple-discord-link.toml'
-export const SDLINK_CONFIG_VERSION = 37
+export const SDLINK_CONFIG_VERSION = 36
 
 /** The variable the bot's token rides in, from the Secret into the mod's file, and the key it has there by default. */
 export const DISCORD_TOKEN_VARIABLE = 'CFG_DISCORD_TOKEN'
