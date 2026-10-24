@@ -74,7 +74,12 @@ bungeecord = false
 auto-afk = 300
 player-commands = ["afk", "balance"]
 
-# ── creative: Fabric with Modrinth mods, in-cluster port of its own ────────────────────────────
+# ── creative: Fabric with Modrinth mods, offline, behind Discord and a password ────────────────
+# Offline (`onlineMode = false`) a name proves nothing: anyone can join as anyone — an operator
+# too. `discord` lets in only names linked to a Discord account; `auth` asks a password of each.
+# Both are mods (Fabric, Quilt, NeoForge; `discord` Forge too) and both are needed: the link is by
+# name, and while the bot is not up the door is open. Every server, whatever it is, runs as the
+# image's own user, takes the game port only, and sees each player's own address.
 [minecraft.creative]
 namespace = "games"
 type = "FABRIC"
@@ -84,6 +89,44 @@ memory = "4G"
 cpu = "1"
 cpuLimit = "3"
 memoryLimit = "6Gi"
+maxPlayers = 50 # as many as the heap and the cpu carry: view-distance is what each one costs
+onlineMode = false
+ops = ["steve"] # offline names are marked so: the image writes the UUID an offline server sees
+whitelist = ["steve", "alex"] # the whole list — a name taken out loses its place at the next start
 modrinth = ["fabric-api", "lithium", "sodium:mc1.21.1-0.6.0"] # slug, or slug:version
 modrinthDependencies = "required"
 removeOldMods = true # mods no longer listed are dropped at the next start
+
+# Simple Discord Link (`sdlink`, installed with what it needs): a name not linked yet is turned
+# away with a code to `/verify` with the bot. The bot: discord.com/developers → New Application →
+# Bot → token, with the Server Members and Message Content intents on; invited to your Discord.
+# The token lives in a Secret of the namespace, never here:
+#   ozc secret set minecraft-discord -n games -d token=@discord-token.txt
+[minecraft.creative.discord]
+secret = "minecraft-discord" # the Secret, and its key (`key = "token"` by default)
+roles = ["player"] # one of these Discord roles to get in (none: any linked account)
+deniedRoles = ["banned"]
+member = true # only members of the bot's Discord server (the default)
+banSync = true # banned on Discord → banned in the game
+
+# EasyAuth (`easyauth`): the first to join under a name `/register`s it, every next join
+# `/login`s — or none, coming back from the same address within `session`.
+[minecraft.creative.auth]
+session = 86400 # seconds; 0 asks at every join
+passwordLength = 8
+loginTries = 3
+kickAfter = 60 # seconds to log in
+accountsPerIp = 3 # names one address may hold
+
+# Whole files under config/, written at every start — so before a mod made its own, and in the
+# format the mod reads (HOCON `.conf` too). What a table leaves out is the mod's default; one for
+# a file `discord` or `auth` writes is laid over theirs.
+[minecraft.creative.configs."config/EasyAuth/main.conf"]
+hidePlayerCoords = true # a player is somewhere else until logged in
+
+[minecraft.creative.configs."config/lithium.properties"]
+mixin.ai.pathing = false
+
+# Variables from a Secret, never written here; one named CFG_… is `${CFG_…}` in any file above.
+[minecraft.creative.secretEnv]
+CFG_WEBHOOK = { secret = "minecraft-discord", key = "webhook" }

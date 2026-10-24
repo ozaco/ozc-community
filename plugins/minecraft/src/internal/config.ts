@@ -1,5 +1,9 @@
-import { CONFIG_FILES, DATA_PATH } from '../const'
+import { stringify } from 'smol-toml'
+
+import { CONFIG_FILES, CONFIGS_PREFIX, DATA_PATH } from '../const'
 import type { MinecraftDef } from '../types'
+
+import { accessConfigsOf } from './access'
 
 /** The `server.properties` keys the spec's own fields stand for. */
 const FIELD_PROPERTIES = {
@@ -47,6 +51,49 @@ const filesOf = (spec: MinecraftDef.ServerSpec): [string, MinecraftDef.ConfigTre
   }
 
   return [...merged]
+}
+
+/** One tree laid over another: a table into the table of the same key, a leaf over a leaf. */
+const overlay = (
+  under: MinecraftDef.ConfigTree,
+  over: MinecraftDef.ConfigTree,
+): MinecraftDef.ConfigTree => {
+  const merged: MinecraftDef.ConfigTree = { ...under }
+
+  for (const [key, value] of Object.entries(over)) {
+    const below = merged[key]
+
+    merged[key] =
+      isTree(value) && below !== undefined && isTree(below) ? overlay(below, value) : value
+  }
+
+  return merged
+}
+
+/** A tree's leaves under their dotted keys, as a `.properties` file holds them. */
+const flatten = (tree: MinecraftDef.ConfigTree, prefix = ''): [string, string][] =>
+  Object.entries(tree).flatMap(([key, value]): [string, string][] =>
+    isTree(value)
+      ? flatten(value, `${prefix}${key}.`)
+      : [[`${prefix}${key}`, Array.isArray(value) ? value.join(',') : String(value)]],
+  )
+
+/**
+ * A whole file's text, in its format: TOML and properties as themselves, the rest (`.conf`,
+ * `.json`, `.json5`, `.yml`) as JSON — HOCON, JSON5 and YAML each read it.
+ */
+const textOf = (path: string, tree: MinecraftDef.ConfigTree): string => {
+  if (path.endsWith('.toml')) {
+    return `${stringify(tree).trimEnd()}\n`
+  }
+
+  if (path.endsWith('.properties')) {
+    return flatten(tree)
+      .map(([key, value]) => `${key}=${value}\n`)
+      .join('')
+  }
+
+  return `${JSON.stringify(tree, null, 2)}\n`
 }
 
 /** One operation of a patch: a key put into the object at `path` — new or not — with `value`. */
@@ -103,3 +150,26 @@ export const patchSetOf = (spec: MinecraftDef.ServerSpec): PatchSet | undefined 
 
 /** The patch set as the file in the pod holds it. */
 export const patchSetText = (set: PatchSet): string => `${JSON.stringify(set, null, 2)}\n`
+
+/** A file `configs` writes whole: its path below `config/`, and its text. */
+export interface ConfigFile {
+  readonly path: string
+  readonly text: string
+}
+
+/**
+ * The files written whole: those `discord` and `auth` write, with `configs` of the same path laid
+ * over them, then the rest of `configs` in its order; none for a spec with neither.
+ */
+export const configFilesOf = (spec: MinecraftDef.ServerSpec): ConfigFile[] => {
+  const files = accessConfigsOf(spec)
+
+  for (const [path, tree] of Object.entries(spec.configs ?? {})) {
+    files[path] = overlay(files[path] ?? {}, tree)
+  }
+
+  return Object.entries(files).map(([path, tree]) => ({
+    path: path.slice(CONFIGS_PREFIX.length),
+    text: textOf(path, tree),
+  }))
+}

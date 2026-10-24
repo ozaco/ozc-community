@@ -8,6 +8,8 @@ import {
   COMPONENT,
   COMPONENT_LABEL,
   CONFIG_HASH_ANNOTATION,
+  CONFIG_VOLUME,
+  CONFIGS_DIR,
   CONTAINER,
   DATA_PATH,
   DATA_VOLUME,
@@ -23,18 +25,19 @@ import {
   MANAGED_LABEL,
   PATCHES_DIR,
   PATCHES_FILE,
-  PATCHES_VOLUME,
   RCON_PORT,
   READY_DELAY_SECONDS,
   READY_FAILURES,
   READY_PERIOD_SECONDS,
+  RUN_AS,
   SNAPSHOT_API,
   SNAPSHOT_GROUP,
   VOLUME_LABEL,
 } from '../const'
 import type { MinecraftDef } from '../types'
 
-import { overruled, patchSetOf, patchSetText, propertiesOf } from './config'
+import { accessProjectsOf, accessSecretsOf } from './access'
+import { configFilesOf, overruled, patchSetOf, patchSetText, propertiesOf } from './config'
 
 type Obj = Record<string, unknown>
 
@@ -69,6 +72,31 @@ const flag = (value: boolean): string => (value ? 'TRUE' : 'FALSE')
 const listed = (values: readonly string[] | undefined): string | undefined =>
   values === undefined || values.length === 0 ? undefined : values.join(',')
 
+/** The Modrinth projects: the spec's, and what `discord` and `auth` install unless it names them. */
+const projectsOf = (spec: MinecraftDef.ServerSpec): string[] | undefined => {
+  const named = new Set(spec.modrinth?.map(project => project.split(':')[0]))
+  const projects = [
+    ...(spec.modrinth ?? []),
+    ...accessProjectsOf(spec).filter(project => !named.has(project)),
+  ]
+
+  return projects.length === 0 ? undefined : projects
+}
+
+/** Whether the server takes players without asking Mojang: the property, else the field. */
+const offlineOf = (spec: MinecraftDef.ServerSpec): boolean =>
+  String(spec.properties?.['online-mode'] ?? spec.onlineMode) === 'false'
+
+/**
+ * Players as the image's user lists take them. Offline, a name is marked `:offline`: the image
+ * would otherwise write the Mojang account's UUID, which an offline server never sees — the
+ * whitelisted player is turned away and the operator is none.
+ */
+const playersOf = (
+  spec: MinecraftDef.ServerSpec,
+  names: readonly string[] | undefined,
+): string | undefined => listed(offlineOf(spec) ? names?.map(name => `${name}:offline`) : names)
+
 /**
  * The heap as a Kubernetes quantity: Java's `G` and `M` are binary units, Kubernetes' plain ones
  * are decimal — `2G` of heap is `2Gi` of memory.
@@ -95,12 +123,67 @@ export const patchesOf = (spec: MinecraftDef.ServerSpec): string | undefined => 
   return set === undefined ? undefined : patchSetText(set)
 }
 
+/** The ConfigMap's key a file of `configs` is kept under: by its place, a path is no key. */
+const configKeyOf = (index: number): string => `config-${index}`
+
+/**
+ * What the ConfigMap of a server carries: the patch set, and the files of `configs`; `undefined`
+ * for a spec with neither.
+ */
+export const configDataOf = (spec: MinecraftDef.ServerSpec): Record<string, string> | undefined => {
+  const patches = patchesOf(spec)
+  const data: Record<string, string> = patches === undefined ? {} : { [PATCHES_FILE]: patches }
+
+  for (const [index, file] of configFilesOf(spec).entries()) {
+    data[configKeyOf(index)] = file.text
+  }
+
+  return Object.keys(data).length === 0 ? undefined : data
+}
+
+/**
+ * Where the ConfigMap's entries are in the pod: each file mounted by itself (`subPath`), so the
+ * image copies plain files out of `/config` — a whole ConfigMap is a tree of links it would copy
+ * as they are.
+ */
+const configMountsOf = (spec: MinecraftDef.ServerSpec): Obj[] => [
+  ...(patchesOf(spec) === undefined
+    ? []
+    : [
+        {
+          name: CONFIG_VOLUME,
+          mountPath: `${PATCHES_DIR}/${PATCHES_FILE}`,
+          subPath: PATCHES_FILE,
+          readOnly: true,
+        },
+      ]),
+  ...configFilesOf(spec).map((file, index) => ({
+    name: CONFIG_VOLUME,
+    mountPath: `${CONFIGS_DIR}/${file.path}`,
+    subPath: configKeyOf(index),
+    readOnly: true,
+  })),
+]
+
 /** A text's fingerprint, for the annotation that rolls the pod when its config changed. */
 const fingerprintOf = (text: string): string => createHash('sha256').update(text).digest('hex')
 
+/** The variables taken from Secrets: what `discord` needs, and `secretEnv` over it. */
+const secretsOf = (spec: MinecraftDef.ServerSpec): Record<string, MinecraftDef.SecretRef> => ({
+  ...accessSecretsOf(spec),
+  ...spec.secretEnv,
+})
+
+/** The variables a Secret holds, as the container takes them. */
+const secretVariablesOf = (spec: MinecraftDef.ServerSpec): Obj[] =>
+  Object.entries(secretsOf(spec)).map(([name, ref]) => ({
+    name,
+    valueFrom: { secretKeyRef: { name: ref.secret, key: ref.key } },
+  }))
+
 /**
  * The environment the image reads, from the spec's fields — and the spec's `env` over them, as
- * written: what both set, `env` decides.
+ * written: what both set, `env` decides. A variable `secretEnv` names is the Secret's alone.
  */
 export const environmentOf = (spec: MinecraftDef.ServerSpec): Record<string, string> => {
   const patches = patchesOf(spec)
@@ -119,12 +202,17 @@ export const environmentOf = (spec: MinecraftDef.ServerSpec): Record<string, str
       spec.onlineMode === undefined || overruled(spec, 'onlineMode')
         ? undefined
         : flag(spec.onlineMode),
-    OPS: listed(spec.ops),
-    WHITELIST: listed(spec.whitelist),
+    OPS: playersOf(spec, spec.ops),
+    // the lists are the whole lists: a name taken out of the spec loses its place at the next start
+    EXISTING_OPS_FILE: listed(spec.ops) === undefined ? undefined : 'SYNCHRONIZE',
+    WHITELIST: playersOf(spec, spec.whitelist),
     ENABLE_WHITELIST: listed(spec.whitelist) === undefined ? undefined : 'TRUE',
+    EXISTING_WHITELIST_FILE: listed(spec.whitelist) === undefined ? undefined : 'SYNCHRONIZE',
     TZ: spec.timezone,
-    MODRINTH_PROJECTS: listed(spec.modrinth),
-    MODRINTH_DOWNLOAD_DEPENDENCIES: spec.modrinthDependencies,
+    MODRINTH_PROJECTS: listed(projectsOf(spec)),
+    // what `discord` and `auth` install comes with what it needs (sdlink: craterlib)
+    MODRINTH_DOWNLOAD_DEPENDENCIES:
+      spec.modrinthDependencies ?? (accessProjectsOf(spec).length === 0 ? undefined : 'required'),
     MODS: listed(spec.mods),
     PLUGINS: listed(spec.plugins),
     SPIGET_RESOURCES: listed(spec.spiget?.map(String)),
@@ -132,6 +220,8 @@ export const environmentOf = (spec: MinecraftDef.ServerSpec): Record<string, str
     REMOVE_OLD_MODS: spec.removeOldMods === undefined ? undefined : flag(spec.removeOldMods),
     CUSTOM_SERVER_PROPERTIES: propertiesOf(spec),
     PATCH_DEFINITIONS: patches === undefined ? undefined : `${PATCHES_DIR}/${PATCHES_FILE}`,
+    // a mod that rewrote its file at the last start made it newer than the spec's: copied anyway
+    SYNC_SKIP_NEWER_IN_DESTINATION: configFilesOf(spec).length === 0 ? undefined : 'FALSE',
     JVM_OPTS: listed(spec.jvmOpts)?.replaceAll(',', ' '),
     USE_AIKAR_FLAGS: spec.aikarFlags === undefined ? undefined : flag(spec.aikarFlags),
   }
@@ -147,7 +237,9 @@ export const environmentOf = (spec: MinecraftDef.ServerSpec): Record<string, str
     env[key] = String(value)
   }
 
-  return env
+  return Object.fromEntries(
+    Object.entries(env).filter(([key]) => !Object.hasOwn(secretsOf(spec), key)),
+  )
 }
 
 /** The claim's spec as the StatefulSet's template makes it: one writer, the size, the class. */
@@ -217,29 +309,35 @@ const namespaceObject = (namespace: string): K8sDef.KubeObject => ({
   metadata: { name: namespace, labels: { [MANAGED_LABEL]: MANAGED_BY } },
 })
 
-/** The ConfigMap of a server's patch set, when it configures a file. */
+/** The ConfigMap of a server's patch set and `configs`, when it configures a file. */
 const configMap = (name: string, spec: MinecraftDef.ServerSpec): K8sDef.KubeObject[] => {
-  const patches = patchesOf(spec)
+  const data = configDataOf(spec)
 
-  return patches === undefined
+  return data === undefined
     ? []
     : [
         {
           apiVersion: 'v1',
           kind: 'ConfigMap',
           metadata: metaFor(configMapOf(name), spec.namespace, labelsOf(name)),
-          data: { [PATCHES_FILE]: patches },
+          data,
         },
       ]
 }
 
-/** The Service players connect through. */
+/**
+ * The Service players connect through. Reached from outside, its traffic stays on the node that
+ * runs the server (`Local`): the server sees each player's own address — with the cluster's
+ * policy every player would be the node's, and a ban by address or a login remembered by address
+ * would hold for all of them.
+ */
 const service = (name: string, spec: MinecraftDef.ServerSpec): K8sDef.KubeObject => ({
   apiVersion: 'v1',
   kind: 'Service',
   metadata: metaFor(name, spec.namespace, labelsOf(name)),
   spec: {
     type: SERVICE_TYPES[spec.expose ?? 'loadbalancer'],
+    ...(spec.expose === 'none' ? {} : { externalTrafficPolicy: 'Local' }),
     selector: labelsOf(name),
     ports: [
       {
@@ -254,12 +352,47 @@ const service = (name: string, spec: MinecraftDef.ServerSpec): K8sDef.KubeObject
 })
 
 /**
+ * What may reach the server's pod: the game port, from anywhere — nothing else. The console's port
+ * is the pod's own (`console` runs inside it), no other pod of the cluster gets to it. Named in a
+ * namespace as the other objects are: one the spec does not name is the `default` they go to.
+ */
+const networkPolicy = (name: string, spec: MinecraftDef.ServerSpec): K8sDef.KubeObject => ({
+  apiVersion: 'networking.k8s.io/v1',
+  kind: 'NetworkPolicy',
+  metadata: metaFor(name, spec.namespace ?? 'default', labelsOf(name)),
+  spec: {
+    podSelector: { matchLabels: labelsOf(name) },
+    policyTypes: ['Ingress'],
+    ingress: [{ ports: [{ protocol: 'TCP', port: GAME_PORT }] }],
+  },
+})
+
+/** The pod as little as it can be: no root, no privileges to gain, no token of the cluster's. */
+const podSecurity: Obj = {
+  automountServiceAccountToken: false,
+  enableServiceLinks: false,
+  securityContext: {
+    runAsNonRoot: true,
+    runAsUser: RUN_AS,
+    runAsGroup: RUN_AS,
+    fsGroup: RUN_AS,
+    seccompProfile: { type: 'RuntimeDefault' },
+  },
+}
+
+const containerSecurity: Obj = {
+  allowPrivilegeEscalation: false,
+  capabilities: { drop: ['ALL'] },
+}
+
+/**
  * The server: one replica with the world on a claim of its own. Only a readiness probe — the
  * image's own `mc-health` — no liveness: a world that takes long to load would be killed in a loop.
  */
 const statefulSet = (name: string, spec: MinecraftDef.ServerSpec): K8sDef.KubeObject => {
   const labels = labelsOf(name)
-  const patches = patchesOf(spec)
+  const data = configDataOf(spec)
+  const secrets = secretVariablesOf(spec)
 
   return {
     apiVersion: 'apps/v1',
@@ -272,20 +405,25 @@ const statefulSet = (name: string, spec: MinecraftDef.ServerSpec): K8sDef.KubeOb
       template: {
         metadata: {
           labels,
-          // a changed patch set is a changed pod: the annotation rolls it
-          ...(patches === undefined
+          // a changed patch set or file is a changed pod: the annotation rolls it
+          ...(data === undefined
             ? {}
-            : { annotations: { [CONFIG_HASH_ANNOTATION]: fingerprintOf(patches) } }),
+            : { annotations: { [CONFIG_HASH_ANNOTATION]: fingerprintOf(JSON.stringify(data)) } }),
         },
         spec: {
+          ...podSecurity,
           containers: [
             {
               name: CONTAINER,
               image: imageOf(spec),
-              env: Object.entries(environmentOf(spec)).map(([key, value]) => ({
-                name: key,
-                value,
-              })),
+              securityContext: containerSecurity,
+              env: [
+                ...Object.entries(environmentOf(spec)).map(([key, value]) => ({
+                  name: key,
+                  value,
+                })),
+                ...secrets,
+              ],
               ports: [
                 { name: 'minecraft', containerPort: GAME_PORT, protocol: 'TCP' },
                 { name: 'rcon', containerPort: RCON_PORT, protocol: 'TCP' },
@@ -297,17 +435,12 @@ const statefulSet = (name: string, spec: MinecraftDef.ServerSpec): K8sDef.KubeOb
                 periodSeconds: READY_PERIOD_SECONDS,
                 failureThreshold: READY_FAILURES,
               },
-              volumeMounts: [
-                { name: DATA_VOLUME, mountPath: DATA_PATH },
-                ...(patches === undefined
-                  ? []
-                  : [{ name: PATCHES_VOLUME, mountPath: PATCHES_DIR, readOnly: true }]),
-              ],
+              volumeMounts: [{ name: DATA_VOLUME, mountPath: DATA_PATH }, ...configMountsOf(spec)],
             },
           ],
-          ...(patches === undefined
+          ...(data === undefined
             ? {}
-            : { volumes: [{ name: PATCHES_VOLUME, configMap: { name: configMapOf(name) } }] }),
+            : { volumes: [{ name: CONFIG_VOLUME, configMap: { name: configMapOf(name) } }] }),
         },
       },
       volumeClaimTemplates: [{ metadata: { name: DATA_VOLUME }, spec: claimSpecOf(spec) }],
@@ -318,11 +451,12 @@ const statefulSet = (name: string, spec: MinecraftDef.ServerSpec): K8sDef.KubeOb
 /**
  * The objects a server renders to, in the order they are applied: the Namespace it names (one that
  * is there already is left as it is), the ConfigMap of its patch set when it configures a file,
- * the Service, then the server.
+ * the Service, what may reach the pod, then the server.
  */
 export const render = (name: string, spec: MinecraftDef.ServerSpec): K8sDef.KubeObject[] => [
   ...(spec.namespace === undefined ? [] : [namespaceObject(spec.namespace)]),
   ...configMap(name, spec),
   service(name, spec),
+  networkPolicy(name, spec),
   statefulSet(name, spec),
 ]

@@ -34,6 +34,13 @@ export const RCON_PORT = 25_575
 /** Where the image keeps the world, the properties and everything else of a server. */
 export const DATA_PATH = '/data'
 
+/**
+ * The image's own `minecraft` user and group, the server runs as from the start: never root, so
+ * nothing in the pod can take back what it gave up. `/data` is that user's already — the image
+ * hands it over at its first start.
+ */
+export const RUN_AS = 1000
+
 /** The container's name in the pod, and the volume claim's. */
 export const CONTAINER = 'minecraft'
 export const DATA_VOLUME = 'data'
@@ -76,7 +83,39 @@ export const CLAIM_GONE_INTERVAL_MS = 2000
  */
 export const PATCHES_DIR = '/patches'
 export const PATCHES_FILE = 'patches.json'
-export const PATCHES_VOLUME = 'patches'
+
+/**
+ * Where the files of `configs` are mounted, one by one: the image copies the directory into
+ * `/data/config` at every start (filling in `${CFG_…}`), before the server and its mods read it.
+ * The spec's paths start with `config/`; under this directory they do not.
+ */
+export const CONFIGS_DIR = '/config'
+export const CONFIGS_PREFIX = 'config/'
+
+/** The volume of the ConfigMap that carries the patch set and the files of `configs`. */
+export const CONFIG_VOLUME = 'config'
+
+/**
+ * `discord`: Simple Discord Link (Modrinth `sdlink`), its configuration file, and the version of
+ * that file's layout — written into it, the mod reads the file as it is (a file without one is
+ * one it migrates, and it cannot read one that has none).
+ */
+export const SDLINK_PROJECT = 'sdlink'
+export const SDLINK_CONFIG = 'config/simple-discord-link/simple-discord-link.toml'
+export const SDLINK_CONFIG_VERSION = 37
+
+/** The variable the bot's token rides in, from the Secret into the mod's file, and the key it has there by default. */
+export const DISCORD_TOKEN_VARIABLE = 'CFG_DISCORD_TOKEN'
+export const DISCORD_TOKEN_KEY = 'token'
+
+/** `auth`: EasyAuth (Modrinth `easyauth`) and the two of its files the table writes. */
+export const EASYAUTH_PROJECT = 'easyauth'
+export const EASYAUTH_MAIN = 'config/EasyAuth/main.conf'
+export const EASYAUTH_EXTENDED = 'config/EasyAuth/extended.conf'
+
+/** The server types each mod is built for, as the image spells them. */
+export const SDLINK_TYPES = ['FABRIC', 'QUILT', 'FORGE', 'NEOFORGE'] as const
+export const EASYAUTH_TYPES = ['FABRIC', 'QUILT', 'NEOFORGE'] as const
 
 /** The files the spec's named tables stand for, under `/data`. */
 export const CONFIG_FILES = {

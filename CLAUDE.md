@@ -90,10 +90,34 @@ Pre-commit hook runs `moon run :check`.
   (`config/paper-world-defaults.yml`), `bukkit`, `spigot`, and `files."<path>"` for any other
   YAML/JSON/TOML/properties file under `/data` — rendered to ONE patch set (`$put` per leaf, JsonPath
   in bracket notation; `internal/config.ts`) in the ConfigMap `<n>-config`, mounted at
-  `/patches`, applied by the image's `mc-image-helper patch` at start (`PATCH_DEFINITIONS`); a
-  changed set changes the pod-template annotation `ozc.dev/config-hash`, so `up` rolls the pod.
-  A table the file does not have is NOT made (the put fails at start). `jvmOpts` → `JVM_OPTS`,
-  `aikarFlags` → `USE_AIKAR_FLAGS`. The config is the ozaco TOML, discovered from
+  `/patches/patches.json`, applied by the image's `mc-image-helper patch` at start
+  (`PATCH_DEFINITIONS`); a changed set changes the pod-template annotation `ozc.dev/config-hash`,
+  so `up` rolls the pod. A table the file does not have is NOT made (the put fails at start); a
+  file that is not there yet (a mod's, before its first start) is skipped with a warning.
+  `configs."config/<path>"` is a WHOLE file instead, written at every start: in the same ConfigMap
+  (`config-<i>`), each mounted by itself (`subPath` — a whole ConfigMap is a tree of `..data` links
+  the image would copy as they are) under `/config`, which the image copies into `/data/config`
+  before the server starts (`SYNC_SKIP_NEWER_IN_DESTINATION=FALSE`: what a mod rewrote is
+  replaced); `.toml`/`.properties` as themselves (`smol-toml`), `.conf`/`.json`/`.json5`/`.yml` as
+  JSON, which HOCON/JSON5/YAML read. `secretEnv` takes variables from Secrets (`valueFrom`); one
+  named `CFG_…` is `${CFG_…}` in a value of `configs`/`files` (the image fills it in).
+  `jvmOpts` → `JVM_OPTS`, `aikarFlags` → `USE_AIKAR_FLAGS`.
+
+  The servers run OFFLINE (the user's): a name proves nothing, so who gets in is two existing mods
+  — never a mod of our own. `[minecraft.<n>.discord]` installs Simple Discord Link (`sdlink`) and
+  writes its `config/simple-discord-link/simple-discord-link.toml` (`general.configVersion` 37 in
+  it: the mod cannot read a file without one; the token `${CFG_DISCORD_TOKEN}` from the Secret
+  `discord.secret`, access control on, `roles`, `member`, `banSync`): an unlinked name is turned
+  away with a code for the bot. It fails OPEN while the bot is down, and the link is by name —
+  hence `[minecraft.<n>.auth]`: EasyAuth (`easyauth`), a password per name, its
+  `config/EasyAuth/{main,extended}.conf`. Each brings `MODRINTH_DOWNLOAD_DEPENDENCIES=required`
+  unless the spec says otherwise; `configs` of the same path is laid over theirs; refused on a type
+  the mod is not built for. Offline, `ops`/`whitelist` names go to the image as `name:offline`
+  (else it writes the Mojang UUID); both lists are the whole lists (`EXISTING_*_FILE=SYNCHRONIZE`).
+  Every server: a NetworkPolicy lets only the game port in (RCON stays in the pod), the Service's
+  `externalTrafficPolicy` is `Local` (each player's own address — EasyAuth's sessions are by
+  address), the pod runs as the image's uid 1000 with no privilege, capability or service-account
+  token. The config is the ozaco TOML, discovered from
   `-C`/cwd up to home — `ozaco.toml`, or a fragment such as `.ozaco/minecraft.toml` beside
   `.ozaco/kube.toml`: the whole shape, with every field, is `plugins/minecraft/examples/minecraft.toml`
   (a test holds it to the schema).

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { EASYAUTH_TYPES, SDLINK_TYPES } from '../const'
 import type { MinecraftDef } from '../types'
 
 /** `env` values are stringified at render. */
@@ -24,6 +25,51 @@ const PatchableFileSchema = z
     /\.(?:ya?ml|json5?|toml|properties)$/u,
     'expected a .yml, .json, .toml or .properties file',
   )
+
+/** A file under `config/` written whole: a format a mod reads, which the plugin can write. */
+const ConfigFileSchema = z
+  .string()
+  .regex(
+    /^(?!.*(?:^|\/)\.\.(?:\/|$))config\/.+$/u,
+    'expected a path under config/, e.g. "config/EasyAuth/main.conf"',
+  )
+  .regex(
+    /\.(?:conf|ya?ml|json5?|toml|properties)$/u,
+    'expected a .conf, .yml, .json, .toml or .properties file',
+  )
+
+/** A variable's name, as a container takes it. */
+const EnvNameSchema = z
+  .string()
+  .regex(/^[A-Za-z_][A-Za-z0-9_]*$/u, 'expected a variable name, e.g. "CFG_DISCORD_TOKEN"')
+
+/** A value kept in a Secret: which Secret, which of its keys. */
+const SecretRefSchema = z.object({ secret: z.string().min(1), key: z.string().min(1) })
+
+/** `discord`: the Secret of the bot's token, and who of Discord gets in. */
+const DiscordSchema = z.object({
+  secret: z.string().min(1),
+  key: z.string().min(1).optional(),
+  roles: z.array(z.string().min(1)).optional(),
+  deniedRoles: z.array(z.string().min(1)).optional(),
+  member: z.boolean().optional(),
+  banSync: z.boolean().optional(),
+})
+
+/** `auth`: how hard EasyAuth asks. */
+const AuthSchema = z.object({
+  session: z.number().int().min(0).optional(),
+  passwordLength: z.number().int().positive().optional(),
+  loginTries: z.number().int().positive().optional(),
+  kickAfter: z.number().int().positive().optional(),
+  accountsPerIp: z.number().int().positive().optional(),
+})
+
+/** Whether a table that installs a mod is on a server type the mod is built for. */
+const builtFor =
+  (types: readonly string[]) =>
+  (spec: { type?: string | undefined }): boolean =>
+    types.includes(spec.type ?? '')
 
 /** A player's name: whatever Mojang takes, as long as it is something. */
 const PlayerSchema = z.string().min(1)
@@ -88,13 +134,29 @@ export const ServerSpecSchema: z.ZodType<MinecraftDef.ServerSpec> = z
     bukkit: ConfigTreeSchema.optional(),
     spigot: ConfigTreeSchema.optional(),
     files: z.record(PatchableFileSchema, ConfigTreeSchema).optional(),
+    configs: z.record(ConfigFileSchema, ConfigTreeSchema).optional(),
+    discord: DiscordSchema.optional(),
+    auth: AuthSchema.optional(),
     jvmOpts: z.array(z.string().min(1)).optional(),
     aikarFlags: z.boolean().optional(),
     env: EnvSchema.optional(),
+    secretEnv: z.record(EnvNameSchema, SecretRefSchema).optional(),
   })
   .refine(spec => spec.nodePort === undefined || spec.expose === 'nodeport', {
     message: '`nodePort` needs `expose = "nodeport"`',
     path: ['nodePort'],
+  })
+  .refine(
+    spec => Object.keys(spec.env ?? {}).every(key => !Object.hasOwn(spec.secretEnv ?? {}, key)),
+    { message: 'a variable is in `env` or in `secretEnv`, not in both', path: ['secretEnv'] },
+  )
+  .refine(spec => spec.discord === undefined || builtFor(SDLINK_TYPES)(spec), {
+    message: `\`discord\` is a mod: it needs \`type\` = ${SDLINK_TYPES.join(', ')}`,
+    path: ['discord'],
+  })
+  .refine(spec => spec.auth === undefined || builtFor(EASYAUTH_TYPES)(spec), {
+    message: `\`auth\` is a mod: it needs \`type\` = ${EASYAUTH_TYPES.join(', ')}`,
+    path: ['auth'],
   })
 
 /** The whole `[minecraft.*]` namespace: a server per key. */

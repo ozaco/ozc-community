@@ -55,6 +55,7 @@ describe('a server', () => {
     expect(objects.map(object => [object.kind, object.metadata?.name])).toEqual([
       ['Namespace', 'games'],
       ['Service', 'creative'],
+      ['NetworkPolicy', 'creative'],
       ['StatefulSet', 'creative'],
     ])
     expect(objects[0]?.metadata?.labels).toEqual({ 'app.kubernetes.io/managed-by': 'ozc' })
@@ -70,18 +71,25 @@ describe('a server', () => {
 
     expect(objects.map(object => [object.kind, object.metadata?.name])).toEqual([
       ['Service', 'survival'],
+      ['NetworkPolicy', 'survival'],
       ['StatefulSet', 'survival'],
     ])
-    expect(objects.map(object => object.metadata?.labels)).toEqual([labels, labels])
-    expect(objects.map(object => object.metadata?.namespace)).toEqual([undefined, undefined])
+    expect(objects.map(object => object.metadata?.labels)).toEqual([labels, labels, labels])
+    // a NetworkPolicy is no kind the sdk knows: it is named in the namespace the others go to
+    expect(objects.map(object => object.metadata?.namespace)).toEqual([
+      undefined,
+      'default',
+      undefined,
+    ])
     expect(at(objects[0], 'spec.selector')).toEqual(labels)
-    expect(at(objects[1], 'spec.selector.matchLabels')).toEqual(labels)
-    expect(at(objects[1], 'spec.replicas')).toBe(1)
-    expect(at(objects[1], 'spec.serviceName')).toBe('survival')
+    expect(at(objects[1], 'spec.podSelector.matchLabels')).toEqual(labels)
+    expect(at(objects[2], 'spec.selector.matchLabels')).toEqual(labels)
+    expect(at(objects[2], 'spec.replicas')).toBe(1)
+    expect(at(objects[2], 'spec.serviceName')).toBe('survival')
   })
 
   it('is the newest Paper with 2G of heap on 10Gi, reached through a LoadBalancer on 25565, unless told otherwise', () => {
-    const [service, server] = render('survival', {})
+    const [service, , server] = render('survival', {})
 
     expect(imageOf({})).toBe('itzg/minecraft-server:latest')
     expect(environmentOf({})).toEqual({
@@ -115,7 +123,7 @@ describe('a server', () => {
   })
 
   it('takes every field of the spec, and lets env have the last word', () => {
-    const [, service, server] = render('creative', FULL)
+    const [, service, , server] = render('creative', FULL)
 
     expect(environmentOf(FULL)).toEqual({
       EULA: 'TRUE',
@@ -126,9 +134,11 @@ describe('a server', () => {
       DIFFICULTY: 'hard',
       MAX_PLAYERS: '8',
       ONLINE_MODE: 'FALSE',
-      OPS: 'steve,alex',
-      WHITELIST: 'steve',
+      OPS: 'steve:offline,alex:offline',
+      EXISTING_OPS_FILE: 'SYNCHRONIZE',
+      WHITELIST: 'steve:offline',
       ENABLE_WHITELIST: 'TRUE',
+      EXISTING_WHITELIST_FILE: 'SYNCHRONIZE',
       TZ: 'Europe/Istanbul',
       MODRINTH_PROJECTS: 'fabric-api,sodium:mc1.21.1-0.6.0',
       MODRINTH_DOWNLOAD_DEPENDENCIES: 'required',
@@ -167,7 +177,62 @@ describe('a server', () => {
   })
 
   it('is reached in-cluster only with expose = "none"', () => {
-    expect(at(render('lan', { expose: 'none' })[0], 'spec.type')).toBe('ClusterIP')
+    const [service] = render('lan', { expose: 'none' })
+
+    expect(at(service, 'spec.type')).toBe('ClusterIP')
+    expect(at(service, 'spec.externalTrafficPolicy')).toBeUndefined()
+  })
+
+  it("keeps each player's own address: the traffic stays on the node that runs the server", () => {
+    expect(at(render('survival', {})[0], 'spec.externalTrafficPolicy')).toBe('Local')
+    expect(at(render('creative', FULL)[1], 'spec.externalTrafficPolicy')).toBe('Local')
+  })
+
+  it('lets the game port reach the pod, and nothing else', () => {
+    const [, policy] = render('survival', { namespace: 'games' }).slice(1)
+
+    expect(policy?.kind).toBe('NetworkPolicy')
+    expect(policy?.metadata?.namespace).toBe('games')
+    expect(at(policy, 'spec')).toEqual({
+      podSelector: { matchLabels: at(policy, 'metadata.labels') },
+      policyTypes: ['Ingress'],
+      ingress: [{ ports: [{ protocol: 'TCP', port: 25_565 }] }],
+    })
+  })
+
+  it("runs as the image's own user, with nothing to gain and no token of the cluster's", () => {
+    const pod = at(render('survival', {}).at(-1), 'spec.template.spec') as Obj
+
+    expect(pod['automountServiceAccountToken']).toBe(false)
+    expect(pod['enableServiceLinks']).toBe(false)
+    expect(pod['securityContext']).toEqual({
+      runAsNonRoot: true,
+      runAsUser: 1000,
+      runAsGroup: 1000,
+      fsGroup: 1000,
+      seccompProfile: { type: 'RuntimeDefault' },
+    })
+    expect(at(pod, 'containers.0.securityContext')).toEqual({
+      allowPrivilegeEscalation: false,
+      capabilities: { drop: ['ALL'] },
+    })
+  })
+
+  it('marks players offline when the server is, and takes the lists as the whole lists', () => {
+    const lists = { ops: ['steve'], whitelist: ['steve', 'alex'] }
+
+    expect(environmentOf({ ...lists, onlineMode: true })).toMatchObject({
+      OPS: 'steve',
+      WHITELIST: 'steve,alex',
+      EXISTING_OPS_FILE: 'SYNCHRONIZE',
+      EXISTING_WHITELIST_FILE: 'SYNCHRONIZE',
+    })
+    // the property decides when it is there, as the server reads it
+    expect(environmentOf({ ...lists, properties: { 'online-mode': false } })).toMatchObject({
+      OPS: 'steve:offline',
+      WHITELIST: 'steve:offline,alex:offline',
+    })
+    expect(environmentOf({ whitelist: [] })['EXISTING_WHITELIST_FILE']).toBeUndefined()
   })
 
   it('runs in the pod the StatefulSet names, with its world on the claim it made', () => {

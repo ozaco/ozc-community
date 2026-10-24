@@ -34,13 +34,14 @@
     },
     "plugins/minecraft": {
       "name": "@ozaco/ozc-plugin-minecraft",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "devDependencies": {
         "@ozaco/cli": "catalog:ozaco",
         "@ozaco/devkit": "catalog:ozaco",
         "@ozaco/ozc-devkit": "catalog:ozaco",
         "@ozaco/ozc-sdk": "catalog:ozaco",
         "@ozaco/std": "catalog:ozaco",
+        "smol-toml": "^1.9.1",
         "tsdown": "catalog:build",
         "unrun": "catalog:build",
         "zod": "catalog:shared",

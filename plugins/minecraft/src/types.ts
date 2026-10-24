@@ -12,6 +12,45 @@ export namespace MinecraftDef {
     [key: string]: ConfigValue
   }
 
+  /** A value kept in a Kubernetes Secret of the server's namespace: the Secret and its key. */
+  export interface SecretRef {
+    secret: string
+    key: string
+  }
+
+  /**
+   * Discord in front of the server (Simple Discord Link): a player whose name is not linked to a
+   * Discord account is turned away with a code to give the bot; one without the roles, too.
+   */
+  export interface Discord {
+    /** The Secret of the server's namespace holding the bot's token, and its key (`token`). */
+    secret: string
+    key?: string | undefined
+    /** The roles one of which a player needs (none: any account), and those that keep one out. */
+    roles?: string[] | undefined
+    deniedRoles?: string[] | undefined
+    /** Whether a player has to be a member of the bot's Discord server (default `true`). */
+    member?: boolean | undefined
+    /** Whether a Discord ban is a ban in the game, too (default `false`). */
+    banSync?: boolean | undefined
+  }
+
+  /**
+   * A password for every name (EasyAuth): offline, a name proves nothing — the first to join
+   * registers it, the next has to log in. What is not set is the mod's own default.
+   */
+  export interface Auth {
+    /** How long a login is remembered for the address it came from, in seconds (0: never). */
+    session?: number | undefined
+    /** The shortest password taken. */
+    passwordLength?: number | undefined
+    /** Wrong passwords before a kick, and the seconds a player has to log in. */
+    loginTries?: number | undefined
+    kickAfter?: number | undefined
+    /** How many names one address may hold (unset: no limit). */
+    accountsPerIp?: number | undefined
+  }
+
   /** How a server is reached from outside the cluster. */
   export type Expose = 'none' | 'nodeport' | 'loadbalancer'
 
@@ -96,11 +135,34 @@ export namespace MinecraftDef {
     bukkit?: ConfigTree | undefined
     spigot?: ConfigTree | undefined
     files?: Record<string, ConfigTree> | undefined
+    /**
+     * Whole files under `config/`, by path (`config/EasyAuth/main.conf`), nested as each file is:
+     * written at every start, before the server or a mod reads them — so also before a mod has
+     * made its file, and in any format a mod reads (`.conf`, `.json5`, `.yml` are written as JSON,
+     * which each of them reads; `.toml` and `.properties` as themselves). What a table leaves out
+     * is the mod's own default. Unlike `files`, the file is the table's: what the mod wrote into it
+     * meanwhile is gone at the next start.
+     */
+    configs?: Record<string, ConfigTree> | undefined
+    /**
+     * Who gets in, on a modded server: `discord` installs Simple Discord Link and lets in only
+     * names linked to a Discord account (with the roles); `auth` installs EasyAuth and asks a
+     * password of every name. Each writes its mod's file (`configs` of the same path is laid over
+     * it) and brings the mods it needs.
+     */
+    discord?: Discord | undefined
+    auth?: Auth | undefined
     /** Extra JVM arguments (`JVM_OPTS`), and Aikar's flags (`USE_AIKAR_FLAGS`). */
     jvmOpts?: string[] | undefined
     aikarFlags?: boolean | undefined
     /** Any other variable the image reads, as is — laid over what the fields above set. */
     env?: Record<string, string | number | boolean> | undefined
+    /**
+     * Variables whose values are a Secret's (`ozc secret set <secret> -n <namespace> -d key=@file`),
+     * never written in the config. One named `CFG_…` can stand in a value of `configs` or `files`
+     * as `${CFG_…}`: the image fills it in at start.
+     */
+    secretEnv?: Record<string, SecretRef> | undefined
   }
 
   /** A server to act on: its name and its spec. */
