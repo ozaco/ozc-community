@@ -28,7 +28,12 @@ const GUARDED: MinecraftDef.ServerSpec = {
   type: 'FABRIC',
   onlineMode: false,
   modrinth: ['fabric-api', 'lithium'],
-  discord: { secret: 'minecraft-discord', roles: ['player'], banSync: true },
+  discord: {
+    secret: 'minecraft-discord',
+    channel: '1234567890123456789',
+    roles: ['player'],
+    banSync: true,
+  },
   auth: { session: 3600, passwordLength: 8, loginTries: 3, accountsPerIp: 2 },
 }
 
@@ -51,6 +56,7 @@ describe('discord and auth', () => {
     expect(filesOf(GUARDED)['simple-discord-link/simple-discord-link.toml']).toEqual({
       general: { configVersion: 36 },
       botConfig: { botToken: `\${CFG_DISCORD_TOKEN}` },
+      channelsAndWebhooks: { channels: { chatChannelID: '1234567890123456789' } },
       accessControl: {
         enabled: true,
         requireDiscordMembership: true,
@@ -125,5 +131,9 @@ describe('discord and auth', () => {
     expect(issues({ type: 'FORGE', discord: { secret: 'x' }, auth: {} })).toEqual(['auth'])
     expect(issues({ type: 'NEOFORGE', discord: { secret: 'x' }, auth: {} })).toEqual([])
     expect(issues({ type: 'FABRIC', discord: {} })).toEqual(['discord.secret'])
+    // an ID is too long for a TOML number to hold exactly: a string of digits
+    expect(issues({ type: 'FABRIC', discord: { secret: 'x', channel: 'general' } })).toEqual([
+      'discord.channel',
+    ])
   })
 })

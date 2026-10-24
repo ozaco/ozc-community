@@ -50,6 +50,10 @@ const SecretRefSchema = z.object({ secret: z.string().min(1), key: z.string().mi
 const DiscordSchema = z.object({
   secret: z.string().min(1),
   key: z.string().min(1).optional(),
+  channel: z
+    .string()
+    .regex(/^\d+$/u, 'expected a channel ID, e.g. "1234567890123456789" — as a string')
+    .optional(),
   roles: z.array(z.string().min(1)).optional(),
   deniedRoles: z.array(z.string().min(1)).optional(),
   member: z.boolean().optional(),

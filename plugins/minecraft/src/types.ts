@@ -26,7 +26,16 @@ export namespace MinecraftDef {
     /** The Secret of the server's namespace holding the bot's token, and its key (`token`). */
     secret: string
     key?: string | undefined
-    /** The roles one of which a player needs (none: any account), and those that keep one out. */
+    /**
+     * The channel the bot talks in, by ID (Discord: right-click the channel → Copy Channel ID) — the
+     * mod needs one. A channel set with the bot's `/setchannel` is forgotten at the next start: the
+     * file is the TOML's.
+     */
+    channel?: string | undefined
+    /**
+     * The roles one of which a player needs (none: any account), and those that keep one out — by
+     * ID, or by name, looked up in the first Discord server the bot is in.
+     */
     roles?: string[] | undefined
     deniedRoles?: string[] | undefined
     /** Whether a player has to be a member of the bot's Discord server (default `true`). */

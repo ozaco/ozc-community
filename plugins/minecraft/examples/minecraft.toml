@@ -104,7 +104,8 @@ removeOldMods = true # mods no longer listed are dropped at the next start
 #   ozc secret set minecraft-discord -n games -d token=@discord-token.txt
 [minecraft.creative.discord]
 secret = "minecraft-discord" # the Secret, and its key (`key = "token"` by default)
-roles = ["player"] # one of these Discord roles to get in (none: any linked account)
+channel = "1234567890123456789" # the channel the bot talks in, by ID (Copy Channel ID) — the mod needs one
+roles = ["player"] # one of these Discord roles to get in (none: any linked account) — by name or ID
 deniedRoles = ["banned"]
 member = true # only members of the bot's Discord server (the default)
 banSync = true # banned on Discord → banned in the game

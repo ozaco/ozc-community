@@ -31,6 +31,9 @@ const placeholderOf = (variable: string): string => `\${${variable}}`
 const discordConfig = (discord: MinecraftDef.Discord): MinecraftDef.ConfigTree => ({
   general: { configVersion: SDLINK_CONFIG_VERSION },
   botConfig: { botToken: placeholderOf(DISCORD_TOKEN_VARIABLE) },
+  ...(discord.channel === undefined
+    ? {}
+    : { channelsAndWebhooks: { channels: { chatChannelID: discord.channel } } }),
   accessControl: defined({
     enabled: true,
     requireDiscordMembership: discord.member ?? true,

@@ -109,7 +109,8 @@ Pre-commit hook runs `moon run :check`.
   it, one below the mod's 37: a file of its own version is read as complete and a missing key is
   null — a null flag stopped the mod on the cluster (2026-10-24) — while an older one is migrated,
   the mod's defaults filled in; a file with no version it cannot read; the token `${CFG_DISCORD_TOKEN}` from the Secret
-  `discord.secret`, access control on, `roles`, `member`, `banSync`): an unlinked name is turned
+  `discord.secret`, `channel` → `chatChannelID` (the mod requires one; a `/setchannel` is lost at the next start),
+  access control on, `roles` by ID or name in the bot's FIRST guild, `member`, `banSync`): an unlinked name is turned
   away with a code for the bot. It fails OPEN while the bot is down, and the link is by name —
   hence `[minecraft.<n>.auth]`: EasyAuth (`easyauth`), a password per name, its
   `config/EasyAuth/{main,extended}.conf`. Each brings `MODRINTH_DOWNLOAD_DEPENDENCIES=required`
