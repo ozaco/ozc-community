@@ -33,7 +33,7 @@
     "@commitlint/prompt-cli": "^21.2.3",
     "@ozaco/ozc-sdk": "catalog:ozaco",
     "@ozaco/std": "catalog:ozaco",
-    "@stylistic/eslint-plugin": "^5.10.0",
+    "@stylistic/eslint-plugin": "^6.0.0",
     "@types/bun": "^1.4.2",
     "@types/node": "^26.6.4",
     "oxfmt": "^0.73.0",
